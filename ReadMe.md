@@ -17,11 +17,10 @@ Aplikasi visualisasi 3D interaktif berbasis browser untuk menjelajahi ruangan 3D
 ## Cara Pakai
 
 ### Manual dengan Three JS
-npm install
-npm install three 
-npm run dev
-
-# Buka browser: http://localhost:8080
+- npm install
+- npm install three 
+- npm run dev
+- Buka browser: http://localhost:8080
 
 ### VS Code
 Gunakan Live Server extension.
