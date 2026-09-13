@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ruangan Interaktif Final (Fix Crash GPU)</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js'; 
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xdddddd); 
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 8); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        
+        // PENTING: Setting Shadow Map
+        renderer.shadowMap.enabled = true; 
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping; 
+        renderer.toneMappingExposure = 1.0;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const gui = new GUI();
+        
+        const settings = {
+            ambientIntensity: 0.5,
+            sunIntensity: 1,
+            sunColor: 0xffffff,
+            lampIntensity: 10,   
+            lampColor: 0xffaa00 
+        };
+
+        // 1. Cahaya Ambient (Dasar)
+        const ambientLight = new THREE.AmbientLight(0xffffff, settings.ambientIntensity);
+        scene.add(ambientLight);
+
+        // 2. Cahaya Matahari (Satu-satunya yang CAST SHADOW)
+        const dirLight = new THREE.DirectionalLight(settings.sunColor, settings.sunIntensity);
+        dirLight.position.set(5, 10, 7);
+        dirLight.castShadow = true; // Ini OK karena cuma 1
+        scene.add(dirLight);
+
+        const folderLingkungan = gui.addFolder('Lingkungan');
+        folderLingkungan.add(ambientLight, 'intensity', 0, 2).name('Cahaya Dasar');
+        folderLingkungan.add(dirLight, 'intensity', 0, 5).name('Matahari');
+        folderLingkungan.addColor(settings, 'sunColor').name('Warna Matahari').onChange((val) => {
+            dirLight.color.set(val);
+        });
+
+        // ==========================================
+        // BAGIAN 4: LOAD MODEL 
+        // ==========================================
+        const loader = new GLTFLoader();
+        
+        let lampLights = [];      
+        let lampMaterials = [];   
+
+        loader.load('NCC_ROOMS2.glb', function (gltf) {
+            const model = gltf.scene;
+            
+            console.log("--- MULAI SCANNING MODEL ---");
+
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    // Biarkan object menerima/membuat bayangan dari matahari
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+
+                    // Logika Deteksi Lampu (Hybrid)
+                    const objName = child.name.toLowerCase();
+                    let matName = "";
+                    if (child.material) {
+                        if (Array.isArray(child.material)) matName = child.material[0].name.toLowerCase();
+                        else matName = child.material.name.toLowerCase();
+                    }
+
+                    // Cek Object "lamp" atau Material "lamp"
+                    const isLamp = objName.includes('lamp') || matName.includes('lamp') || matName.includes('light');
+
+                    if (isLamp) {
+                        // Jangan print semua 25 biar console bersih, cukup hitung saja nanti
+                        
+                        // A. Pasang Cahaya (PointLight)
+                        if (child.children.length === 0) {
+                            // PointLight(warna, intensitas, jarak)
+                            const bulbLight = new THREE.PointLight(settings.lampColor, settings.lampIntensity, 5);
+                            
+                            // --- BAGIAN YANG DIBENERIN ---
+                            bulbLight.castShadow = false; // MATIKAN INI AGAR TIDAK CRASH
+                            // -----------------------------
+                            
+                            child.add(bulbLight);
+                            lampLights.push(bulbLight);
+                        }
+
+                        // B. Ubah Material jadi Glowing
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach(mat => {
+                            if (!lampMaterials.includes(mat)) {
+                                lampMaterials.push(mat);
+                                mat.color.set(0x000000); 
+                                mat.emissive = new THREE.Color(settings.lampColor);
+                                mat.emissiveIntensity = settings.lampIntensity; 
+                                mat.needsUpdate = true;
+                            }
+                        });
+                    }
+                }
+            });
+
+            scene.add(model);
+            console.log(`--- SELESAI LOAD: Sukses menemukan ${lampLights.length} lampu. ---`);
+
+            const folderLampu = gui.addFolder('Kontrol Lampu');
+            folderLampu.add(settings, 'lampIntensity', 0, 50).name('Kekuatan').onChange((val) => {
+                lampLights.forEach(lamp => lamp.intensity = val);
+                lampMaterials.forEach(mat => mat.emissiveIntensity = val); 
+            });
+            folderLampu.addColor(settings, 'lampColor').name('Warna').onChange((val) => {
+                lampLights.forEach(lamp => lamp.color.set(val));
+                lampMaterials.forEach(mat => mat.emissive.set(val));
+            });
+
+        }, undefined, function (error) { 
+            console.error('Error:', error); 
+        });
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
